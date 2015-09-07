@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
 
 	"github.com/veandco/go-sdl2/sdl"
 	"golang.org/x/net/websocket"
+	"gopkg.in/vmihailenco/msgpack.v2"
 )
 
 var (
@@ -50,24 +50,36 @@ func (s Ship) Points() []sdl.Point {
 	return points.Rotate(-s.Rotation).ToPointsOffset(s.Position)
 }
 
+type join struct {
+	Join interface{} `msgpack:"join"`
+}
+
 func joinMessage(name string) []byte {
-	return []byte("{\"join\":{\"name\":\"" + name + "\"}}")
+	n := struct {
+		Name string `msgpack:"name"`
+	}{
+		Name: name,
+	}
+	m := join{Join: n}
+
+	b, _ := msgpack.Marshal(m)
+	return b
 }
 
 type InputState struct {
-	Left   bool `json:"left"`
-	Right  bool `json:"right"`
-	Thrust bool `json:"thrust"`
+	Left   bool `msgpack:"left"`
+	Right  bool `msgpack:"right"`
+	Thrust bool `msgpack:"thrust"`
 }
 
 func (i InputState) Message() []byte {
 	a := struct {
-		InputState InputState `json:"inputState"`
+		InputState InputState `msgpack:"inputState"`
 	}{
 		InputState: i,
 	}
 
-	b, _ := json.Marshal(a)
+	b, _ := msgpack.Marshal(a)
 	return b
 }
 
@@ -113,12 +125,12 @@ func run(serverStr, name string) int {
 
 	renderer.Clear()
 
-	ws.Write(joinMessage(name))
+	websocket.Message.Send(ws, joinMessage(name))
 
 	running = true
 
 	var data map[string]map[string][]map[string]interface{}
-	decoder := json.NewDecoder(ws)
+	decoder := msgpack.NewDecoder(ws)
 
 	renderer.SetDrawColor(1, 1, 1, 255)
 	renderer.Clear()
@@ -158,7 +170,7 @@ func run(serverStr, name string) int {
 		}
 
 		if !newInputState.IsSameAs(inputState) {
-			ws.Write(newInputState.Message())
+			websocket.Message.Send(ws, newInputState.Message())
 			inputState = newInputState
 		}
 
@@ -168,7 +180,7 @@ func run(serverStr, name string) int {
 			colourhex, _ := hex.DecodeString(ship["colour"].(string)[1:7])
 			rot, _ := ship["rotation"].(float64)
 			s := Ship{
-				Position: V2{ship["x"].(float64), ship["y"].(float64)},
+				Position: V2{float64(ship["x"].(int64)), float64(ship["y"].(int64))},
 				Size:     30,
 				Rotation: rot,
 				Doge:     ship["doge"].(bool),
